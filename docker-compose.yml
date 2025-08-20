@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  screenshot-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - API_KEY=dev-api-key-123
+      - REQUIRE_API_KEY=false
+      - ALLOWED_ORIGINS=*
+      - RATE_LIMIT_MAX=1000
+      - BLOCK_PRIVATE_IPS=false
+    volumes:
+      - ./screenshots:/tmp/screenshots
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health/live', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a simple web interface for testing
+  test-client:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./test-client:/usr/share/nginx/html:ro
+    depends_on:
+      - screenshot-api
+    profiles:
+      - test

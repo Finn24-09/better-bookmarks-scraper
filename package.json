@@ -1,0 +1,40 @@
+{
+  "name": "screenshot-api",
+  "version": "1.0.0",
+  "description": "Fast, lightweight screenshot API service optimized for Google Cloud Run",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "test": "jest",
+    "docker:build": "docker build -t screenshot-api .",
+    "docker:run": "docker run -p 8080:8080 screenshot-api"
+  },
+  "keywords": ["screenshot", "api", "puppeteer", "cloud-run", "docker"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^24.9.0",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.2.0",
+    "joi": "^17.12.2",
+    "compression": "^1.7.4",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "@types/cors": "^2.8.17",
+    "@types/compression": "^1.7.5",
+    "typescript": "^5.4.3",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.12"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
