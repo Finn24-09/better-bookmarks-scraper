@@ -11,8 +11,11 @@ export const validateApiKey = (
 ): void => {
   const apiKey = req.headers['x-api-key'] as string || req.query.apiKey as string;
   
-  // If no API key is required (for development)
-  if (!process.env.API_KEY && !process.env.REQUIRE_API_KEY) {
+  // Check if API key requirement is disabled
+  const requireApiKey = process.env.REQUIRE_API_KEY?.toLowerCase() === 'true';
+  
+  // If no API key is required, skip validation
+  if (!requireApiKey) {
     return next();
   }
 
