@@ -18,7 +18,8 @@ export interface ScreenshotOptions {
 }
 
 export interface ScreenshotResult {
-  image: Buffer;
+  image?: Buffer;
+  thumbnailUrl?: string;
   isVideoThumbnail: boolean;
   videoDetectionResult?: VideoDetectionResult;
 }
@@ -191,7 +192,31 @@ export class BrowserManager {
           videoDetectionResult.detectionLog.forEach(log => console.log(log));
 
           if (videoDetectionResult.thumbnail) {
-            // Try to fetch the thumbnail image
+            // Check if this is from sources that provide thumbnail_url and should be returned directly
+            const shouldReturnUrlDirectly = 
+              videoDetectionResult.thumbnail.source === 'oEmbed' ||
+              videoDetectionResult.thumbnail.source === 'schema.org VideoObject' ||
+              videoDetectionResult.thumbnail.url.includes('thumbnail_url') ||
+              videoDetectionResult.thumbnail.url.includes('maxresdefault') || // YouTube thumbnails
+              videoDetectionResult.thumbnail.url.includes('vimeocdn.com') || // Vimeo thumbnails
+              videoDetectionResult.thumbnail.url.includes('dailymotion.com') || // Dailymotion thumbnails
+              videoDetectionResult.thumbnail.confidence >= 0.8; // High confidence thumbnails
+            
+            if (shouldReturnUrlDirectly) {
+              // Return thumbnail URL directly without fetching/storing the image
+              console.log(`🔗 Returning thumbnail URL directly: ${videoDetectionResult.thumbnail.url}`);
+              console.log(`📊 Source: ${videoDetectionResult.thumbnail.source}, Confidence: ${videoDetectionResult.thumbnail.confidence}`);
+              const totalTime = Date.now() - startTime;
+              console.log(`✅ Intelligent screenshot completed with thumbnail URL in ${totalTime}ms`);
+              
+              return {
+                thumbnailUrl: videoDetectionResult.thumbnail.url,
+                isVideoThumbnail: true,
+                videoDetectionResult
+              };
+            }
+            
+            // For other thumbnail sources, try to fetch the image
             try {
               console.log(`🖼️ Fetching thumbnail: ${videoDetectionResult.thumbnail.url}`);
               const response = await page.evaluate(async (thumbnailUrl) => {

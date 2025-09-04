@@ -175,19 +175,45 @@ router.post(
 
       const processingTime = Date.now() - startTime;
 
-      // Set appropriate headers
-      res.set({
-        'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
-        'Content-Length': result.image.length.toString(),
-        'X-Processing-Time': `${processingTime}ms`,
-        'X-Screenshot-Format': format,
-        'X-Screenshot-Dimensions': `${width}x${height}`,
-        'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
-        'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
-        'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
-      });
+      // Check if we got a thumbnail URL instead of an image buffer
+      if (result.thumbnailUrl) {
+        // Return the thumbnail URL as JSON response
+        res.set({
+          'Content-Type': 'application/json',
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Screenshot-Format': 'url',
+          'X-Screenshot-Dimensions': `${width}x${height}`,
+          'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+          'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
+          'X-Thumbnail-Source': result.videoDetectionResult?.thumbnail?.source || 'unknown',
+          'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        });
 
-      res.send(result.image);
+        res.json({
+          thumbnailUrl: result.thumbnailUrl,
+          isVideoThumbnail: result.isVideoThumbnail,
+          processingTime: `${processingTime}ms`,
+          source: result.videoDetectionResult?.thumbnail?.source || 'unknown',
+          method: result.videoDetectionResult?.thumbnail?.method || 'none'
+        });
+      } else if (result.image) {
+        // Return the image buffer as before
+        res.set({
+          'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
+          'Content-Length': result.image.length.toString(),
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Screenshot-Format': format,
+          'X-Screenshot-Dimensions': `${width}x${height}`,
+          'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+          'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
+          'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        });
+
+        res.send(result.image);
+      } else {
+        // This shouldn't happen, but handle it gracefully
+        throw new Error('No image or thumbnail URL returned from screenshot service');
+      }
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
       
@@ -285,19 +311,45 @@ router.get(
 
       const processingTime = Date.now() - startTime;
 
-      // Set appropriate headers
-      res.set({
-        'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
-        'Content-Length': result.image.length.toString(),
-        'X-Processing-Time': `${processingTime}ms`,
-        'X-Screenshot-Format': format,
-        'X-Screenshot-Dimensions': `${width}x${height}`,
-        'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
-        'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
-        'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
-      });
+      // Check if we got a thumbnail URL instead of an image buffer
+      if (result.thumbnailUrl) {
+        // Return the thumbnail URL as JSON response
+        res.set({
+          'Content-Type': 'application/json',
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Screenshot-Format': 'url',
+          'X-Screenshot-Dimensions': `${width}x${height}`,
+          'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+          'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
+          'X-Thumbnail-Source': result.videoDetectionResult?.thumbnail?.source || 'unknown',
+          'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        });
 
-      res.send(result.image);
+        res.json({
+          thumbnailUrl: result.thumbnailUrl,
+          isVideoThumbnail: result.isVideoThumbnail,
+          processingTime: `${processingTime}ms`,
+          source: result.videoDetectionResult?.thumbnail?.source || 'unknown',
+          method: result.videoDetectionResult?.thumbnail?.method || 'none'
+        });
+      } else if (result.image) {
+        // Return the image buffer as before
+        res.set({
+          'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
+          'Content-Length': result.image.length.toString(),
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Screenshot-Format': format,
+          'X-Screenshot-Dimensions': `${width}x${height}`,
+          'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+          'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
+          'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        });
+
+        res.send(result.image);
+      } else {
+        // This shouldn't happen, but handle it gracefully
+        throw new Error('No image or thumbnail URL returned from screenshot service');
+      }
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
       

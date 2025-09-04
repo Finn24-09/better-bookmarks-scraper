@@ -112,7 +112,12 @@ GET /api/v1/screenshot?url=https://example.com&width=1920&height=1080&format=png
 
 ##### Response
 
+The API can return two different response types depending on the content:
+
+**Image Response (Default)**
+
 - **Content-Type**: `image/png` or `image/jpeg`
+- **Body**: Binary image data
 - **Headers**:
   - `X-Processing-Time`: Processing time in milliseconds
   - `X-Screenshot-Format`: Image format used
@@ -120,6 +125,31 @@ GET /api/v1/screenshot?url=https://example.com&width=1920&height=1080&format=png
   - `X-Is-Video-Thumbnail`: `true` if a video thumbnail was returned, `false` for regular screenshots
   - `X-Video-Detection-Method`: The method used to find the thumbnail (`metadata`, `video-element`, `dom-traversal`, `css-background`, `iframe`, `oembed`, or `none`)
   - `Cache-Control`: Caching headers
+
+**Thumbnail URL Response (For High-Quality Video Thumbnails)**
+
+- **Content-Type**: `application/json`
+- **Body**: JSON object with thumbnail information
+- **Headers**:
+  - `X-Processing-Time`: Processing time in milliseconds
+  - `X-Screenshot-Format`: `url`
+  - `X-Screenshot-Dimensions`: Requested dimensions
+  - `X-Is-Video-Thumbnail`: `true`
+  - `X-Video-Detection-Method`: The method used to find the thumbnail
+  - `X-Thumbnail-Source`: The source of the thumbnail (e.g., `oEmbed`, `og:image`)
+  - `Cache-Control`: Caching headers
+
+**JSON Response Format:**
+
+```json
+{
+  "thumbnailUrl": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+  "isVideoThumbnail": true,
+  "processingTime": "2341ms",
+  "source": "og:image",
+  "method": "metadata"
+}
+```
 
 ##### Example Requests
 
@@ -386,11 +416,40 @@ The detection system works well with:
 - **HTML5 video** (with poster attributes)
 - **Most video hosting platforms** (with Open Graph tags)
 
+### Thumbnail URL Optimization
+
+For optimal performance and storage efficiency, the system can return thumbnail URLs directly instead of downloading and processing the image files. This happens automatically when:
+
+- **High-confidence thumbnails** are detected (confidence ≥ 0.8)
+- **oEmbed responses** contain `thumbnail_url` fields
+- **Schema.org VideoObject** metadata includes `thumbnailUrl`
+- **Well-known video platforms** provide direct thumbnail URLs (YouTube, Vimeo, etc.)
+
+**Benefits:**
+
+- **Faster response times** - No image download/processing required
+- **Reduced bandwidth** - Only URL is returned, not image data
+- **Lower storage costs** - No temporary image storage needed
+- **Better scalability** - Reduced server resource usage
+
+**Example Response:**
+
+```json
+{
+  "thumbnailUrl": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+  "isVideoThumbnail": true,
+  "processingTime": "2341ms",
+  "source": "og:image",
+  "method": "metadata"
+}
+```
+
 ### Performance Impact
 
 - **Additional overhead**: ~500-2000ms for video detection
 - **Graceful fallbacks**: Quick fallback to regular screenshots on failures
-- **Memory efficient**: Streams thumbnail images directly
+- **Memory efficient**: Returns URLs directly when possible, streams images otherwise
+- **Storage optimization**: Saves bandwidth and storage by returning URLs for high-quality thumbnails
 
 ## ⚙️ Configuration
 
