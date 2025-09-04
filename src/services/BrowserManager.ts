@@ -1,5 +1,6 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import { BannerHandler } from './BannerHandler';
+import { VideoThumbnailDetector, VideoDetectionResult } from './VideoThumbnailDetector';
 
 export interface ScreenshotOptions {
   width?: number;
@@ -13,6 +14,13 @@ export interface ScreenshotOptions {
   bannerTimeout?: number;
   customBannerSelectors?: string[];
   injectBannerBlockingCSS?: boolean;
+  detectVideoThumbnails?: boolean;
+}
+
+export interface ScreenshotResult {
+  image: Buffer;
+  isVideoThumbnail: boolean;
+  videoDetectionResult?: VideoDetectionResult;
 }
 
 export class BrowserManager {
@@ -88,6 +96,215 @@ export class BrowserManager {
     }
 
     return this.browser;
+  }
+
+  public async takeIntelligentScreenshot(
+    url: string,
+    options: ScreenshotOptions = {}
+  ): Promise<ScreenshotResult> {
+    const {
+      width = 1920,
+      height = 1080,
+      format = 'png',
+      quality = 80,
+      fullPage = false,
+      timeout = 30000,
+      waitUntil = 'domcontentloaded',
+      handleBanners = true,
+      bannerTimeout = 5000,
+      customBannerSelectors = [],
+      injectBannerBlockingCSS = false,
+      detectVideoThumbnails = true,
+    } = options;
+
+    let browser: Browser;
+    let page: Page | null = null;
+
+    try {
+      browser = await this.getBrowser();
+      page = await browser.newPage();
+
+      // Set viewport
+      await page.setViewport({ width, height });
+
+      // Set user agent to avoid bot detection
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      );
+
+      // Set shorter timeouts for faster responses
+      await page.setDefaultNavigationTimeout(timeout);
+      await page.setDefaultTimeout(timeout);
+
+      // Navigate to the URL
+      console.log(`📸 Taking intelligent screenshot of: ${url}`);
+      const startTime = Date.now();
+      
+      await page.goto(url, {
+        waitUntil,
+        timeout,
+      });
+
+      // Wait a shorter time for dynamic content to load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const loadTime = Date.now() - startTime;
+      console.log(`⏱️ Page loaded in ${loadTime}ms`);
+
+      // Handle banners and overlays if enabled
+      if (handleBanners) {
+        try {
+          // Inject banner blocking CSS if requested
+          if (injectBannerBlockingCSS) {
+            await BannerHandler.injectBannerBlockingCSS(page);
+          }
+
+          // Handle common banners
+          await BannerHandler.handleBanners(page, bannerTimeout);
+
+          // Handle custom banner selectors if provided
+          if (customBannerSelectors.length > 0) {
+            await BannerHandler.handleCustomBanners(page, customBannerSelectors);
+          }
+        } catch (bannerError: any) {
+          console.warn(`⚠️ Banner handling failed: ${bannerError.message}`);
+          // Continue with screenshot even if banner handling fails
+        }
+      }
+
+      let videoDetectionResult: VideoDetectionResult | undefined;
+      let finalImage: Buffer;
+      let isVideoThumbnail = false;
+
+      // Try to detect video thumbnails if enabled
+      if (detectVideoThumbnails) {
+        try {
+          console.log('🎬 Detecting video thumbnails...');
+          const detectionStartTime = Date.now();
+          
+          videoDetectionResult = await VideoThumbnailDetector.detectVideoThumbnail(page);
+          
+          const detectionTime = Date.now() - detectionStartTime;
+          console.log(`🔍 Video detection completed in ${detectionTime}ms`);
+
+          // Log detection results
+          videoDetectionResult.detectionLog.forEach(log => console.log(log));
+
+          if (videoDetectionResult.thumbnail) {
+            // Try to fetch the thumbnail image
+            try {
+              console.log(`🖼️ Fetching thumbnail: ${videoDetectionResult.thumbnail.url}`);
+              const response = await page.evaluate(async (thumbnailUrl) => {
+                const response = await fetch(thumbnailUrl);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const arrayBuffer = await response.arrayBuffer();
+                return Array.from(new Uint8Array(arrayBuffer));
+              }, videoDetectionResult.thumbnail.url);
+
+              finalImage = Buffer.from(response);
+              isVideoThumbnail = true;
+              console.log(`✅ Successfully fetched video thumbnail (${finalImage.length} bytes)`);
+            } catch (thumbnailError: any) {
+              console.warn(`⚠️ Failed to fetch thumbnail: ${thumbnailError.message}`);
+              // Fall back to regular screenshot or video region crop
+              const croppedScreenshot = await VideoThumbnailDetector.detectVideoRegionAndCrop(page);
+              if (croppedScreenshot) {
+                finalImage = croppedScreenshot;
+                isVideoThumbnail = true;
+                console.log(`✅ Used cropped video region as fallback`);
+              } else {
+                // Final fallback to regular screenshot
+                finalImage = await this.takeRegularScreenshot(page, { format, quality, fullPage });
+                console.log(`📸 Used regular screenshot as final fallback`);
+              }
+            }
+          } else if (videoDetectionResult.hasVideo) {
+            // Video detected but no thumbnail found, try to crop video region
+            console.log('🎥 Video detected but no thumbnail found, trying to crop video region...');
+            const croppedScreenshot = await VideoThumbnailDetector.detectVideoRegionAndCrop(page);
+            if (croppedScreenshot) {
+              finalImage = croppedScreenshot;
+              isVideoThumbnail = true;
+              console.log(`✅ Successfully cropped video region`);
+            } else {
+              // Fallback to regular screenshot
+              finalImage = await this.takeRegularScreenshot(page, { format, quality, fullPage });
+              console.log(`📸 Used regular screenshot as fallback`);
+            }
+          } else {
+            // No video detected, take regular screenshot
+            finalImage = await this.takeRegularScreenshot(page, { format, quality, fullPage });
+            console.log(`📸 No video detected, took regular screenshot`);
+          }
+        } catch (detectionError: any) {
+          console.warn(`⚠️ Video detection failed: ${detectionError.message}`);
+          // Fallback to regular screenshot
+          finalImage = await this.takeRegularScreenshot(page, { format, quality, fullPage });
+          console.log(`📸 Used regular screenshot due to detection error`);
+        }
+      } else {
+        // Video detection disabled, take regular screenshot
+        finalImage = await this.takeRegularScreenshot(page, { format, quality, fullPage });
+        console.log(`📸 Video detection disabled, took regular screenshot`);
+      }
+
+      const totalTime = Date.now() - startTime;
+      console.log(`✅ Intelligent screenshot completed in ${totalTime}ms`);
+
+      return {
+        image: finalImage,
+        isVideoThumbnail,
+        videoDetectionResult
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Intelligent screenshot failed for ${url}:`, error);
+      
+      // If browser disconnected, reset it
+      if (error.message && (
+        error.message.includes('Protocol error') || 
+        error.message.includes('Connection closed') ||
+        error.message.includes('Target closed') ||
+        error.message.includes('Session closed')
+      )) {
+        console.log('🔄 Browser connection lost, resetting...');
+        this.browser = null;
+      }
+      
+      throw new Error(`Intelligent screenshot failed: ${error.message}`);
+    } finally {
+      // Safely close the page
+      if (page) {
+        try {
+          await page.close();
+        } catch (closeError: any) {
+          console.warn('⚠️ Failed to close page:', closeError.message || 'Unknown error');
+        }
+      }
+    }
+  }
+
+  private async takeRegularScreenshot(
+    page: Page,
+    options: { format?: 'png' | 'jpeg'; quality?: number; fullPage?: boolean }
+  ): Promise<Buffer> {
+    const { format = 'png', quality = 80, fullPage = false } = options;
+
+    const screenshotOptions: any = {
+      type: format,
+      fullPage,
+    };
+
+    if (format === 'jpeg') {
+      screenshotOptions.quality = quality;
+    }
+
+    const screenshotStartTime = Date.now();
+    const screenshot = await page.screenshot(screenshotOptions);
+    const screenshotTime = Date.now() - screenshotStartTime;
+    
+    console.log(`📸 Regular screenshot taken in ${screenshotTime}ms`);
+    return Buffer.from(screenshot);
   }
 
   public async takeScreenshot(

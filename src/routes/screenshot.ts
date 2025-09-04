@@ -96,6 +96,11 @@ const screenshotSchema = Joi.object({
     .messages({
       'boolean.base': 'injectBannerBlockingCSS must be a boolean',
     }),
+  detectVideoThumbnails: Joi.boolean()
+    .default(true)
+    .messages({
+      'boolean.base': 'detectVideoThumbnails must be a boolean',
+    }),
 });
 
 // POST /api/v1/screenshot
@@ -120,6 +125,7 @@ router.post(
         bannerTimeout,
         customBannerSelectors,
         injectBannerBlockingCSS,
+        detectVideoThumbnails,
       } = req.body;
 
       // Additional URL validation for security
@@ -161,24 +167,27 @@ router.post(
         bannerTimeout,
         customBannerSelectors,
         injectBannerBlockingCSS,
+        detectVideoThumbnails,
       };
 
       const browserManager = BrowserManager.getInstance();
-      const screenshot = await browserManager.takeScreenshot(url, options);
+      const result = await browserManager.takeIntelligentScreenshot(url, options);
 
       const processingTime = Date.now() - startTime;
 
       // Set appropriate headers
       res.set({
         'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
-        'Content-Length': screenshot.length.toString(),
+        'Content-Length': result.image.length.toString(),
         'X-Processing-Time': `${processingTime}ms`,
         'X-Screenshot-Format': format,
         'X-Screenshot-Dimensions': `${width}x${height}`,
+        'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+        'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
         'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
       });
 
-      res.send(screenshot);
+      res.send(result.image);
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
       
@@ -226,6 +235,7 @@ router.get(
         bannerTimeout,
         customBannerSelectors,
         injectBannerBlockingCSS,
+        detectVideoThumbnails,
       } = value;
 
       // Additional URL validation for security
@@ -267,24 +277,27 @@ router.get(
         bannerTimeout,
         customBannerSelectors,
         injectBannerBlockingCSS,
+        detectVideoThumbnails,
       };
 
       const browserManager = BrowserManager.getInstance();
-      const screenshot = await browserManager.takeScreenshot(url, options);
+      const result = await browserManager.takeIntelligentScreenshot(url, options);
 
       const processingTime = Date.now() - startTime;
 
       // Set appropriate headers
       res.set({
         'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg',
-        'Content-Length': screenshot.length.toString(),
+        'Content-Length': result.image.length.toString(),
         'X-Processing-Time': `${processingTime}ms`,
         'X-Screenshot-Format': format,
         'X-Screenshot-Dimensions': `${width}x${height}`,
+        'X-Is-Video-Thumbnail': result.isVideoThumbnail.toString(),
+        'X-Video-Detection-Method': result.videoDetectionResult?.thumbnail?.method || 'none',
         'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
       });
 
-      res.send(screenshot);
+      res.send(result.image);
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
       

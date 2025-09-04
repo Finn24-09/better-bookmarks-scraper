@@ -7,7 +7,7 @@ Write-Host ""
 # Configuration
 $baseUrl = "http://localhost:8080"
 $apiKey = "dev-test-key-123"
-$targetUrl = "https://google.com"
+$targetUrl = "https://www.youtube.com/watch?v=2Qmy4ckRxwo"
 
 Write-Host "API Base URL: $baseUrl" -ForegroundColor Yellow
 Write-Host "API Key: $apiKey" -ForegroundColor Yellow
@@ -38,12 +38,13 @@ Write-Host ""
 Write-Host "=== Test 2: POST request with JSON body ===" -ForegroundColor Cyan
 $postUrl = "$baseUrl/api/v1/screenshot"
 $body = @{
-    url           = $targetUrl
-    width         = 1920
-    height        = 1080
-    format        = "png"
-    fullPage      = $false
-    handleBanners = $true
+    url                   = $targetUrl
+    detectVideoThumbnails = $true
+    width                 = 1920
+    height                = 1080
+    format                = "png"
+    fullPage              = $false
+    handleBanners         = $true
 } | ConvertTo-Json
 
 $postHeaders = @{

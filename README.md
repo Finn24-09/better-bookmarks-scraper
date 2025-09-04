@@ -8,6 +8,7 @@ A fast, lightweight, and secure screenshot API service optimized for Google Clou
 - 🔒 **Secure** - API key authentication and input validation
 - 🎯 **Flexible** - Support for PNG and JPEG formats with customizable options
 - 🛡️ **Smart Banner Handling** - Automatically detects and dismisses cookie banners, age verification, and overlays
+- 🎬 **Intelligent Video Thumbnail Detection** - Extracts high-quality thumbnails from video pages instead of raw screenshots
 - 📊 **Monitoring** - Built-in health checks and performance metrics
 - 🐳 **Docker Ready** - Optimized Docker image for Cloud Run
 - 🛡️ **Production Ready** - Rate limiting, error handling, and security features
@@ -93,20 +94,21 @@ GET /api/v1/screenshot?url=https://example.com&width=1920&height=1080&format=png
 
 ##### Parameters
 
-| Parameter                 | Type     | Default        | Description                                    |
-| ------------------------- | -------- | -------------- | ---------------------------------------------- |
-| `url`                     | string   | **required**   | The URL to screenshot (HTTP/HTTPS only)        |
-| `width`                   | number   | 1920           | Viewport width (100-3840)                      |
-| `height`                  | number   | 1080           | Viewport height (100-2160)                     |
-| `format`                  | string   | "png"          | Image format ("png" or "jpeg")                 |
-| `quality`                 | number   | 80             | JPEG quality (1-100, only for JPEG)            |
-| `fullPage`                | boolean  | false          | Capture full page or just viewport             |
-| `timeout`                 | number   | 30000          | Request timeout in milliseconds (5000-60000)   |
-| `waitUntil`               | string   | "networkidle2" | When to consider page loaded                   |
-| `handleBanners`           | boolean  | true           | Enable/disable automatic banner handling       |
-| `bannerTimeout`           | number   | 5000           | Maximum time (ms) to spend handling banners    |
-| `customBannerSelectors`   | string[] | []             | Custom CSS selectors for site-specific banners |
-| `injectBannerBlockingCSS` | boolean  | false          | Inject CSS to hide common banner containers    |
+| Parameter                 | Type     | Default        | Description                                          |
+| ------------------------- | -------- | -------------- | ---------------------------------------------------- |
+| `url`                     | string   | **required**   | The URL to screenshot (HTTP/HTTPS only)              |
+| `width`                   | number   | 1920           | Viewport width (100-3840)                            |
+| `height`                  | number   | 1080           | Viewport height (100-2160)                           |
+| `format`                  | string   | "png"          | Image format ("png" or "jpeg")                       |
+| `quality`                 | number   | 80             | JPEG quality (1-100, only for JPEG)                  |
+| `fullPage`                | boolean  | false          | Capture full page or just viewport                   |
+| `timeout`                 | number   | 30000          | Request timeout in milliseconds (5000-60000)         |
+| `waitUntil`               | string   | "networkidle2" | When to consider page loaded                         |
+| `handleBanners`           | boolean  | true           | Enable/disable automatic banner handling             |
+| `bannerTimeout`           | number   | 5000           | Maximum time (ms) to spend handling banners          |
+| `customBannerSelectors`   | string[] | []             | Custom CSS selectors for site-specific banners       |
+| `injectBannerBlockingCSS` | boolean  | false          | Inject CSS to hide common banner containers          |
+| `detectVideoThumbnails`   | boolean  | true           | Enable/disable intelligent video thumbnail detection |
 
 ##### Response
 
@@ -115,6 +117,8 @@ GET /api/v1/screenshot?url=https://example.com&width=1920&height=1080&format=png
   - `X-Processing-Time`: Processing time in milliseconds
   - `X-Screenshot-Format`: Image format used
   - `X-Screenshot-Dimensions`: Image dimensions
+  - `X-Is-Video-Thumbnail`: `true` if a video thumbnail was returned, `false` for regular screenshots
+  - `X-Video-Detection-Method`: The method used to find the thumbnail (`metadata`, `video-element`, `dom-traversal`, `css-background`, `iframe`, `oembed`, or `none`)
   - `Cache-Control`: Caching headers
 
 ##### Example Requests
@@ -274,6 +278,119 @@ curl -X POST "http://localhost:8080/api/v1/screenshot" \
 - **Typical overhead**: 1-3 seconds for banner detection and handling
 - **Configurable timeout**: Adjust `bannerTimeout` based on needs
 - **Graceful fallback**: Screenshot continues even if banner handling fails
+
+## 🎬 Video Thumbnail Detection
+
+The Screenshot API includes intelligent video thumbnail detection that automatically extracts high-quality thumbnail images from video pages instead of taking raw screenshots. This provides much better visual representations for video content, making them more useful for bookmarks, previews, and other applications.
+
+### How It Works
+
+When `detectVideoThumbnails` is enabled (default: `true`), the system uses a multi-strategy approach to find the best video thumbnail:
+
+#### Detection Strategies (in priority order)
+
+1. **Metadata Extraction**
+
+   - Open Graph images (`og:image`)
+   - Twitter Card images (`twitter:image`)
+   - Schema.org VideoObject thumbnailUrl
+
+2. **Video Element Analysis**
+
+   - `<video>` tags with `poster` attributes
+   - Lazy-loaded data attributes (`data-thumb`, `data-poster`, `data-thumbnail`, etc.)
+
+3. **DOM Traversal**
+
+   - Images within video containers
+   - Sibling images near video players
+   - Images in elements with video-related class names or IDs
+
+4. **CSS Background Images**
+
+   - Background images on video player elements
+   - Elements with video-related styling
+
+5. **Embedded Player Detection**
+
+   - YouTube, Vimeo, Dailymotion, Twitch iframes
+   - Data attributes on iframe elements
+
+6. **oEmbed Integration**
+
+   - oEmbed discovery links
+   - Thumbnail URLs from oEmbed responses
+
+7. **Visual Fallback**
+   - Automatic detection of video regions
+   - Cropped screenshots of video player areas
+   - Fallback to regular screenshot if all else fails
+
+### Candidate Validation
+
+All thumbnail candidates are validated and scored based on:
+
+- **Image dimensions** (minimum 200x150 pixels)
+- **Aspect ratio** (prefers 16:9, 4:3, 3:2, 1.85:1, 2.35:1)
+- **URL patterns** (rejects icons, sprites, buttons, etc.)
+- **Image quality** (larger images get higher scores)
+- **Source reliability** (video posters > metadata > DOM images)
+
+### Usage Examples
+
+**Video Thumbnail Detection (Default)**
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/screenshot" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}' \
+  --output video-thumbnail.png
+```
+
+**Disable Video Detection**
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/screenshot" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "detectVideoThumbnails": false
+  }' \
+  --output regular-screenshot.png
+```
+
+### Behavior
+
+#### Video Pages
+
+- **With thumbnail found**: Returns the high-quality thumbnail image
+- **Video detected, no thumbnail**: Attempts to crop the video player region
+- **Video detected, crop failed**: Falls back to regular screenshot
+
+#### Non-Video Pages
+
+- **No video detected**: Takes a regular screenshot as before
+- **Detection disabled**: Always takes a regular screenshot
+
+### Supported Sites
+
+The detection system works well with:
+
+- **YouTube** (all video pages)
+- **Vimeo** (embedded and direct)
+- **Dailymotion** (embedded and direct)
+- **Twitch** (clips and videos)
+- **Custom video players** (with proper metadata)
+- **HTML5 video** (with poster attributes)
+- **Most video hosting platforms** (with Open Graph tags)
+
+### Performance Impact
+
+- **Additional overhead**: ~500-2000ms for video detection
+- **Graceful fallbacks**: Quick fallback to regular screenshots on failures
+- **Memory efficient**: Streams thumbnail images directly
 
 ## ⚙️ Configuration
 
