@@ -1,19 +1,27 @@
-version: '3.8'
-
 services:
-  screenshot-api:
-    build: .
+  better-bookmarks-scraper:
+    build: 
+      context: .
+      target: production
+    container_name: better-bookmarks-scraper
+    image: better-bookmarks-scraper:latest
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
+    # Option 1: Use .env file (recommended for production)
+    env_file:
+      - .env
+    # Option 2: Override or add specific environment variables
     environment:
-      - NODE_ENV=development
-      - API_KEY=dev-api-key-123
-      - REQUIRE_API_KEY=false
-      - ALLOWED_ORIGINS=*
-      - RATE_LIMIT_MAX=1000
-      - BLOCK_PRIVATE_IPS=false
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-8080}
+      - API_KEY=${API_KEY:-your-secret-api-key-here}
+      - REQUIRE_API_KEY=${REQUIRE_API_KEY:-true}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://yourdomain.com,https://anotherdomain.com}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-100}
+      - BLOCK_PRIVATE_IPS=${BLOCK_PRIVATE_IPS:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
-      - ./screenshots:/tmp/screenshots
+      - screenshots_data:/tmp/screenshots
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health/live', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
@@ -21,15 +29,28 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    networks:
+      - better-bookmarks-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Optional: Add a simple web interface for testing
-  test-client:
-    image: nginx:alpine
-    ports:
-      - "3000:80"
-    volumes:
-      - ./test-client:/usr/share/nginx/html:ro
-    depends_on:
-      - screenshot-api
-    profiles:
-      - test
+volumes:
+  screenshots_data:
+    driver: local
+
+networks:
+  better-bookmarks-network:
+    driver: bridge

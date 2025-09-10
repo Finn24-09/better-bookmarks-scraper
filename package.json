@@ -1,18 +1,21 @@
 {
-  "name": "screenshot-api",
+  "name": "better-bookmarks-scraper",
   "version": "1.0.0",
-  "description": "Fast, lightweight screenshot API service optimized for Google Cloud Run",
+  "description": "Fast, lightweight screenshot API service for better bookmarks scraping",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
     "test": "jest",
-    "docker:build": "docker build -t screenshot-api .",
-    "docker:run": "docker run -p 8080:8080 screenshot-api"
+    "docker:build": "docker build -t better-bookmarks-scraper .",
+    "docker:run": "docker run -p 8080:8080 better-bookmarks-scraper",
+    "docker:compose:up": "docker-compose up -d",
+    "docker:compose:down": "docker-compose down",
+    "docker:compose:logs": "docker-compose logs -f"
   },
-  "keywords": ["screenshot", "api", "puppeteer", "cloud-run", "docker"],
-  "author": "",
+  "keywords": ["screenshot", "api", "puppeteer", "bookmarks", "scraper", "docker"],
+  "author": "Finn24-09",
   "license": "MIT",
   "dependencies": {
     "express": "^4.19.2",
