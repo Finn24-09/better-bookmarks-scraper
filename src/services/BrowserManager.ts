@@ -160,7 +160,7 @@ export class BrowserManager {
             await BannerHandler.injectBannerBlockingCSS(page);
           }
 
-          // Handle common banners
+          // Handle common banners (first pass)
           await BannerHandler.handleBanners(page, bannerTimeout);
 
           // Handle custom banner selectors if provided
@@ -168,8 +168,22 @@ export class BrowserManager {
             await BannerHandler.handleCustomBanners(page, customBannerSelectors);
           }
         } catch (bannerError: any) {
-          console.warn(`⚠️ Banner handling failed: ${bannerError.message}`);
+          console.warn(`⚠️ Initial banner handling failed: ${bannerError.message}`);
           // Continue with screenshot even if banner handling fails
+        }
+      }
+
+      // Second pass for banners - age verification and overlays often appear after initial load
+      if (handleBanners) {
+        try {
+          // Wait a bit longer for any delayed popups (age verification, etc.)
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Handle banners again - catches delayed age verification and popups
+          await BannerHandler.handleBanners(page, Math.min(bannerTimeout, 5000));
+        } catch (bannerError: any) {
+          console.warn(`⚠️ Second pass banner handling failed: ${bannerError.message}`);
+          // Continue anyway
         }
       }
 

@@ -31,6 +31,9 @@ export class VideoThumbnailDetector {
     log.push('🎬 Starting video thumbnail detection...');
 
     try {
+      // Inject ad detection helper function into page context
+      await this.injectAdDetectionHelper(page);
+
       // Strategy 1: Check metadata (og:image, twitter:image, schema.org)
       log.push('📋 Strategy 1: Checking page metadata...');
       const metadataCandidates = await this.extractMetadataThumbnails(page);
@@ -102,6 +105,76 @@ export class VideoThumbnailDetector {
     }
   }
 
+  private static async injectAdDetectionHelper(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      // Helper function to safely get className as a string
+      const getClassNameString = (element: any): string => {
+        try {
+          if (!element.className) return '';
+          // Handle SVG elements with SVGAnimatedString
+          if (typeof element.className === 'object' && element.className.baseVal !== undefined) {
+            return String(element.className.baseVal || '');
+          }
+          // Handle regular string className
+          return String(element.className || '');
+        } catch (e) {
+          return '';
+        }
+      };
+
+      // Helper function to detect if an element is likely an advertisement
+      (globalThis as any).VideoThumbnailDetector_isAdElement = (element: any): boolean => {
+        if (!element) return false;
+
+        try {
+          // Check element attributes for ad indicators
+          const id = String(element.id || '').toLowerCase();
+          const className = getClassNameString(element).toLowerCase();
+          
+          // Common ad indicators in IDs, classes, and attributes
+          const adIndicators = [
+            'ad-', '-ad-', '_ad_', 'ads-', '-ads-', '_ads_',
+            'advert', 'advertisement', 
+            'sponsored', 'sponsor-',
+            'preroll', 'prestitial',
+            'adslot', 'adsense', 'adunit', 
+            'doubleclick', 'googlesyndication',
+            'outbrain', 'taboola', 'adserver', 'adtech'
+          ];
+
+          // Check if any ad indicators are present (be more specific to avoid false positives)
+          const hasAdIndicator = adIndicators.some(indicator => 
+            id.includes(indicator) || className.includes(indicator)
+          );
+
+          if (hasAdIndicator) return true;
+
+          // Check parent elements up to 2 levels (reduced from 3 to avoid false positives)
+          let parent = element.parentElement;
+          let level = 0;
+          while (parent && level < 2) {
+            const parentId = String(parent.id || '').toLowerCase();
+            const parentClass = getClassNameString(parent).toLowerCase();
+            
+            const parentHasAdIndicator = adIndicators.some(indicator =>
+              parentId.includes(indicator) || parentClass.includes(indicator)
+            );
+            
+            if (parentHasAdIndicator) return true;
+            
+            parent = parent.parentElement;
+            level++;
+          }
+
+          return false;
+        } catch (e) {
+          // If any error occurs, assume it's not an ad to avoid breaking detection
+          return false;
+        }
+      };
+    });
+  }
+
   private static async extractMetadataThumbnails(page: Page): Promise<ThumbnailCandidate[]> {
     return await page.evaluate(() => {
       const candidates: any[] = [];
@@ -168,30 +241,59 @@ export class VideoThumbnailDetector {
       const videos = (globalThis as any).document.querySelectorAll('video');
 
       videos.forEach((video: any, index: number) => {
-        // Check poster attribute
-        if (video.poster) {
-          candidates.push({
-            url: video.poster,
-            source: 'video poster',
-            confidence: 0.9,
-            method: 'video-element',
-            element: `video:nth-child(${index + 1})`
-          });
-        }
+        // Check if this video is likely an ad
+        const isLikelyAd = (globalThis as any).VideoThumbnailDetector_isAdElement(video);
+        const adPenalty = isLikelyAd ? -0.3 : 0;
+
+        // Check poster attribute (and common typos like 'postet')
+        const posterAttrs = ['poster', 'postet', 'data-poster-url'];
+        posterAttrs.forEach(attr => {
+          const value = video.getAttribute(attr);
+          if (value) {
+            candidates.push({
+              url: value,
+              source: `video ${attr}`,
+              confidence: Math.max(0.1, 0.9 + adPenalty),
+              method: 'video-element',
+              element: `video:nth-child(${index + 1})`,
+              isAd: isLikelyAd
+            });
+          }
+        });
 
         // Check data attributes for lazy-loaded posters
-        const dataAttrs = ['data-thumb', 'data-poster', 'data-thumbnail', 'data-preview', 'data-image'];
+        const dataAttrs = ['data-thumb', 'data-thumbnail', 'data-preview', 'data-image', 'data-src'];
         dataAttrs.forEach(attr => {
           const value = video.getAttribute(attr);
           if (value) {
             candidates.push({
               url: value,
               source: `video ${attr}`,
-              confidence: 0.8,
+              confidence: Math.max(0.1, 0.8 + adPenalty),
               method: 'video-element',
-              element: `video:nth-child(${index + 1})`
+              element: `video:nth-child(${index + 1})`,
+              isAd: isLikelyAd
             });
           }
+        });
+
+        // Check for source elements within video that might have thumbnails
+        const sources = video.querySelectorAll('source');
+        sources.forEach((source: any, sourceIndex: number) => {
+          const thumbAttrs = ['data-thumb', 'data-thumbnail', 'poster'];
+          thumbAttrs.forEach(attr => {
+            const value = source.getAttribute(attr);
+            if (value) {
+              candidates.push({
+                url: value,
+                source: `video source ${attr}`,
+                confidence: Math.max(0.1, 0.75 + adPenalty),
+                method: 'video-element',
+                element: `video:nth-child(${index + 1}) source:nth-child(${sourceIndex + 1})`,
+                isAd: isLikelyAd
+              });
+            }
+          });
         });
       });
 
@@ -260,38 +362,97 @@ export class VideoThumbnailDetector {
     return await page.evaluate(() => {
       const candidates: any[] = [];
       
+      // Helper function to safely get className as a string (duplicated from helper)
+      const getClassNameString = (element: any): string => {
+        try {
+          if (!element.className) return '';
+          if (typeof element.className === 'object' && element.className.baseVal !== undefined) {
+            return String(element.className.baseVal || '');
+          }
+          return String(element.className || '');
+        } catch (e) {
+          return '';
+        }
+      };
+      
       // Look for elements with background images that might be video thumbnails
       const potentialVideoElements = (globalThis as any).document.querySelectorAll('*');
       
       potentialVideoElements.forEach((element: any, index: number) => {
-        const computedStyle = (globalThis as any).window.getComputedStyle(element);
-        const backgroundImage = computedStyle.backgroundImage;
-        
-        if (backgroundImage && backgroundImage !== 'none') {
-          const urlMatch = backgroundImage.match(/url\(['"]?([^'"]+)['"]?\)/);
-          if (urlMatch) {
-            const url = urlMatch[1];
-            
-            // Check if element looks like a video player or thumbnail
-            const className = element.className.toLowerCase();
-            const id = element.id.toLowerCase();
-            const isVideoRelated = 
-              className.includes('video') || className.includes('player') || 
-              className.includes('thumb') || className.includes('preview') ||
-              id.includes('video') || id.includes('player') || 
-              id.includes('thumb') || id.includes('preview');
-            
-            if (isVideoRelated) {
-              candidates.push({
-                url,
-                source: 'CSS background',
-                confidence: 0.7,
-                method: 'css-background',
-                element: element.tagName.toLowerCase() + (element.id ? `#${element.id}` : '') + 
-                        (element.className ? `.${element.className.split(' ').join('.')}` : '')
-              });
+        try {
+          // Check if this element is likely an ad
+          const isLikelyAd = (globalThis as any).VideoThumbnailDetector_isAdElement(element);
+          const adPenalty = isLikelyAd ? -0.3 : 0;
+
+          // Check both computed style and inline style
+          const computedStyle = (globalThis as any).window.getComputedStyle(element);
+          const inlineStyle = element.getAttribute('style') || '';
+          
+          // Safely get className and id
+          const className = getClassNameString(element).toLowerCase();
+          const id = String(element.id || '').toLowerCase();
+          
+          // Check computed style background image
+          const backgroundImage = computedStyle.backgroundImage;
+          if (backgroundImage && backgroundImage !== 'none') {
+            const urlMatch = backgroundImage.match(/url\(['"]?([^'"]+)['"]?\)/);
+            if (urlMatch) {
+              const url = urlMatch[1];
+              
+              // Check if element looks like a video player or thumbnail
+              const isVideoRelated = 
+                className.includes('video') || className.includes('player') || 
+                className.includes('thumb') || className.includes('preview') ||
+                id.includes('video') || id.includes('player') || 
+                id.includes('thumb') || id.includes('preview') ||
+                className.includes('xplayer') || className.includes('media');
+              
+              if (isVideoRelated) {
+                const classNameForElement = getClassNameString(element);
+                candidates.push({
+                  url,
+                  source: 'CSS background (computed)',
+                  confidence: Math.max(0.1, 0.7 + adPenalty),
+                  method: 'css-background',
+                  element: element.tagName.toLowerCase() + (element.id ? `#${element.id}` : '') + 
+                          (classNameForElement ? `.${classNameForElement.split(' ').join('.')}` : ''),
+                  isAd: isLikelyAd
+                });
+              }
             }
           }
+
+          // Also check inline style attribute directly for background-image
+          // This is important for cases where inline styles are used
+          if (inlineStyle.includes('background-image')) {
+            const urlMatch = inlineStyle.match(/background-image:\s*url\(['"]?([^'"()]+)['"]?\)/);
+            if (urlMatch) {
+              const url = urlMatch[1];
+              
+              // Check if element looks like a video player or thumbnail
+              const isVideoRelated = 
+                className.includes('video') || className.includes('player') || 
+                className.includes('thumb') || className.includes('preview') ||
+                id.includes('video') || id.includes('player') || 
+                id.includes('thumb') || id.includes('preview') ||
+                className.includes('xplayer') || className.includes('media');
+              
+              if (isVideoRelated) {
+                const classNameForElement = getClassNameString(element);
+                candidates.push({
+                  url,
+                  source: 'CSS background (inline style)',
+                  confidence: Math.max(0.1, 0.85 + adPenalty),
+                  method: 'css-background',
+                  element: element.tagName.toLowerCase() + (element.id ? `#${element.id}` : '') + 
+                          (classNameForElement ? `.${classNameForElement.split(' ').join('.')}` : ''),
+                  isAd: isLikelyAd
+                });
+              }
+            }
+          }
+        } catch (e) {
+          // Skip elements that cause errors
         }
       });
 
@@ -310,32 +471,83 @@ export class VideoThumbnailDetector {
         const src = await iframe.evaluate(el => el.src);
         
         // Check if iframe looks like a video player
-        if (src && (
+        const isVideoIframe = src && (
           src.includes('youtube') || src.includes('vimeo') || 
           src.includes('dailymotion') || src.includes('twitch') ||
-          src.includes('player') || src.includes('embed')
-        )) {
+          src.includes('player') || src.includes('embed') ||
+          src.includes('video')
+        );
+        
+        if (isVideoIframe) {
           try {
             // Try to access iframe content (may fail due to CORS)
             const frame = await iframe.contentFrame();
             if (frame) {
-              // Note: Frame detection is limited due to CORS restrictions
-              // For now, we'll skip recursive detection in iframes
-              console.log('Found iframe with video content, but skipping due to CORS restrictions');
+              // Try to extract thumbnails from within the iframe
+              try {
+                const iframeResults = await frame.evaluate(() => {
+                  const innerCandidates: any[] = [];
+                  
+                  // Check for video elements with poster
+                  const videos = (globalThis as any).document.querySelectorAll('video');
+                  videos.forEach((video: any) => {
+                    const posterAttrs = ['poster', 'postet', 'data-poster-url'];
+                    posterAttrs.forEach(attr => {
+                      const value = video.getAttribute(attr);
+                      if (value) {
+                        innerCandidates.push({
+                          url: value,
+                          source: `iframe video ${attr}`,
+                          confidence: 0.85
+                        });
+                      }
+                    });
+                  });
+                  
+                  // Check for elements with background images
+                  const elements = (globalThis as any).document.querySelectorAll('[style*="background-image"]');
+                  elements.forEach((el: any) => {
+                    const style = el.getAttribute('style') || '';
+                    const urlMatch = style.match(/background-image:\s*url\(['"]?([^'"()]+)['"]?\)/);
+                    if (urlMatch) {
+                      innerCandidates.push({
+                        url: urlMatch[1],
+                        source: 'iframe background-image',
+                        confidence: 0.8
+                      });
+                    }
+                  });
+                  
+                  return innerCandidates;
+                });
+                
+                iframeResults.forEach(result => {
+                  candidates.push({
+                    ...result,
+                    method: 'iframe',
+                    element: `iframe:nth-child(${i + 1})`
+                  });
+                });
+              } catch (innerError) {
+                // Frame access restricted, continue
+              }
             }
           } catch (error) {
             // CORS or other access issues, try to extract from iframe attributes
-            const poster = await iframe.evaluate(el => 
-              el.getAttribute('data-poster') || 
-              el.getAttribute('data-thumb') || 
-              el.getAttribute('data-thumbnail')
-            );
+            const iframeAttributes = await iframe.evaluate(el => ({
+              poster: el.getAttribute('data-poster') || 
+                     el.getAttribute('data-thumb') || 
+                     el.getAttribute('data-thumbnail') ||
+                     el.getAttribute('poster'),
+              id: el.id,
+              className: el.className
+            }));
             
-            if (poster) {
+            if (iframeAttributes.poster) {
               candidates.push({
-                url: poster,
+                url: iframeAttributes.poster,
                 source: 'iframe data attribute',
-                confidence: 0.6,
+                confidence: 0.7,
                 method: 'iframe',
                 element: `iframe:nth-child(${i + 1})`
               });

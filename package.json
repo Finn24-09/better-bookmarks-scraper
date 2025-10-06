@@ -1,6 +1,6 @@
 {
   "name": "better-bookmarks-scraper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fast, lightweight screenshot API service for better bookmarks scraping",
   "main": "dist/server.js",
   "scripts": {
