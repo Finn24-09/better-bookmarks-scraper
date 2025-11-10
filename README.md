@@ -5,11 +5,13 @@ A fast, lightweight, and secure screenshot API service optimized for Google Clou
 ## ✨ Features
 
 - 🚀 **Fast Cold Starts** - Optimized for serverless environments with browser warm-up
-- 🔒 **Secure** - API key authentication, rate limiting, and input validation
+- ⚡ **High Performance** - Smart early-exit strategies and reduced wait times for sub-second thumbnails
+- 🔒 **Secure** - API key authentication, rate limiting, comprehensive input validation, and SSRF protection
 - 🎯 **Flexible** - Support for PNG and JPEG formats with customizable options
 - 🛡️ **Smart Banner Handling** - Automatically detects and dismisses cookie banners, age verification, and overlays
-- 🎬 **Intelligent Video Thumbnail Detection** - Extracts high-quality thumbnails from video pages instead of raw screenshots
-- 📊 **Monitoring** - Built-in health checks and performance metrics
+- 🎬 **Intelligent Video Thumbnail Detection** - Prioritizes direct URL extraction over screenshots for bandwidth savings
+- 🎯 **Advanced Ad Filtering** - Multi-level ad detection prevents false positives while blocking advertisements
+- 📊 **Monitoring** - Built-in health checks and performance metrics with detailed error reporting
 - 🐳 **Docker Ready** - Optimized Docker image for Cloud Run deployment
 - 🛡️ **Production Ready** - Rate limiting, error handling, and security features
 - ⚡ **Low Resource Usage** - Memory and CPU optimized for serverless environments
@@ -231,7 +233,7 @@ GET /api/v1/screenshot?url=https://example.com&width=1920&height=1080&format=png
 | `timeout`                 | number   | 30000          | Request timeout in milliseconds (5000-60000)         |
 | `waitUntil`               | string   | "networkidle2" | When to consider page loaded                         |
 | `handleBanners`           | boolean  | true           | Enable/disable automatic banner handling             |
-| `bannerTimeout`           | number   | 5000           | Maximum time (ms) to spend handling banners          |
+| `bannerTimeout`           | number   | 3000           | Maximum time (ms) to spend handling banners (per pass) |
 | `customBannerSelectors`   | string[] | []             | Custom CSS selectors for site-specific banners       |
 | `injectBannerBlockingCSS` | boolean  | false          | Inject CSS to hide common banner containers          |
 | `detectVideoThumbnails`   | boolean  | true           | Enable/disable intelligent video thumbnail detection |
@@ -482,12 +484,14 @@ The Screenshot API includes intelligent video thumbnail detection that automatic
 
 ### Detection Strategies (in priority order)
 
-1. **Metadata Extraction** - Open Graph images, Twitter Card images, Schema.org VideoObject
-2. **Video Element Analysis** - `<video>` tags with `poster` attributes
-3. **DOM Traversal** - Images within video containers
-4. **CSS Background Images** - Background images on video player elements
-5. **Embedded Player Detection** - YouTube, Vimeo, Dailymotion, Twitch iframes
-6. **oEmbed Integration** - oEmbed discovery and thumbnail URLs
+1. **Metadata Extraction** (HIGHEST PRIORITY) - Open Graph images, Twitter Card images, Schema.org VideoObject - with early exit on high confidence
+2. **oEmbed Integration** (SECOND PRIORITY) - oEmbed discovery and thumbnail URLs - returns direct URLs when available
+3. **Video Element Analysis** - `<video>` tags with `poster` attributes
+4. **Embedded Player Detection** - YouTube, Vimeo, Dailymotion, Twitch iframes
+5. **CSS Background Images** - Background images on video player elements (only if no high-confidence results)
+6. **DOM Traversal** - Images within video containers (last resort)
+
+**Performance Note:** The API uses smart early-exit strategies. When high-confidence thumbnails are found in metadata or oEmbed (steps 1-2), remaining strategies are skipped for faster processing.
 
 ### Supported Sites
 
@@ -501,9 +505,10 @@ The Screenshot API includes intelligent video thumbnail detection that automatic
 
 ### Performance Impact
 
-- **Additional overhead**: ~500-2000ms for video detection
+- **Typical overhead**: ~200-800ms for video detection (reduced with early-exit optimization)
 - **Memory efficient**: Returns URLs directly when possible
 - **Storage optimization**: Saves bandwidth by returning URLs for high-quality thumbnails
+- **Ad filtering**: Advanced multi-level detection prevents false positives from advertisement videos
 
 ## 🎨 Tech Stack
 
@@ -523,11 +528,12 @@ The Screenshot API includes intelligent video thumbnail detection that automatic
 
 - ✅ **API Key Authentication** - Secure your API with custom keys
 - ✅ **Rate Limiting** - Prevent abuse with configurable rate limits (100 requests per 15 minutes by default)
-- ✅ **Input Validation** - Comprehensive request validation with Joi
-- ✅ **Private IP Blocking** - Prevent SSRF attacks by blocking private IPs
+- ✅ **Input Validation** - Comprehensive request validation with Joi and custom validators
+- ✅ **SSRF Protection** - Enhanced private IP blocking (IPv4/IPv6) and localhost prevention
+- ✅ **URL Sanitization** - Prevents authentication credentials in URLs and validates protocols
 - ✅ **CORS Protection** - Configurable CORS policies
 - ✅ **Security Headers** - Helmet.js for security headers
-- ✅ **Error Handling** - Secure error responses without information leakage
+- ✅ **Error Handling** - Context-aware error messages without information leakage
 
 ### Infrastructure Security
 
@@ -560,6 +566,8 @@ The Screenshot API includes intelligent video thumbnail detection that automatic
 - **Caching Headers** - Appropriate cache control
 - **Connection Reuse** - HTTP keep-alive
 - **Thumbnail URL Returns** - Direct URL returns for high-quality video thumbnails
+- **Reduced Wait Times** - Optimized page load and banner detection timeouts (500ms vs 1000ms)
+- **Early Exit Strategies** - Skip unnecessary detection steps when high-confidence results are found
 
 ## 🚨 Error Handling
 
@@ -577,13 +585,15 @@ The API returns structured error responses:
 
 ### Common Error Codes
 
-| Code | Description                               |
-| ---- | ----------------------------------------- |
-| 400  | Bad Request - Invalid parameters          |
-| 401  | Unauthorized - Invalid or missing API key |
-| 429  | Too Many Requests - Rate limit exceeded   |
-| 500  | Internal Server Error - Screenshot failed |
-| 503  | Service Unavailable - Browser not ready   |
+| Code | Description                                    | Example Message                                                |
+| ---- | ---------------------------------------------- | -------------------------------------------------------------- |
+| 400  | Bad Request - Invalid parameters               | "URL must be a valid HTTP or HTTPS URL"                       |
+| 401  | Unauthorized - Invalid or missing API key      | "Invalid API key provided"                                     |
+| 429  | Too Many Requests - Rate limit exceeded        | "Too many requests from this IP, please try again later"      |
+| 502  | Bad Gateway - Unable to reach website          | "Unable to reach the website. Please check the URL"           |
+| 503  | Service Unavailable - Browser not ready        | "Browser service unavailable. Please try again in a moment"   |
+| 504  | Gateway Timeout - Website loading too slow     | "The website took too long to load. Please increase timeout"  |
+| 500  | Internal Server Error - Screenshot failed      | Detailed context-aware error message based on failure type     |
 
 ## 📈 Monitoring
 

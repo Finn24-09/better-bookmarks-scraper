@@ -19,8 +19,6 @@ export class BannerHandler {
         'a:contains("I am 18 or older")',
         'button:contains("Enter Site")',
         'a:contains("Enter Site")',
-        'button:contains("Enter")',
-        'a:contains("Enter")',
         // Adult site specific patterns
         '.agegate-enter',
         '.age-verification-enter',
@@ -28,13 +26,9 @@ export class BannerHandler {
         '[class*="agegate"] a',
         '[class*="age-verification"] button',
         '[class*="age-verification"] a',
-        // Generic adult site patterns
-        '[href*="enter"]',
-        '[onclick*="enter"]',
-        '[data-action*="enter"]'
       ],
       action: 'click',
-      waitAfter: 3000
+      waitAfter: 1000  // Reduced from 3000ms to 1000ms
     },
     // Cookie consent banners
     {
@@ -222,38 +216,54 @@ export class BannerHandler {
 
   public static async handleBanners(page: Page, timeout: number = 10000): Promise<void> {
     console.log('🔍 Checking for banners and overlays...');
-    
+
     const startTime = Date.now();
     const maxTime = startTime + timeout;
-    
+
     try {
-      // Wait a bit for any dynamic content to load
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      
+      // Reduced wait time for dynamic content (500ms instead of 800ms)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+
       let bannersHandled = 0;
       let attempts = 0;
-      const maxAttempts = 5;
-      
+      const maxAttempts = 3;  // Reduced from 5 to 3 for faster processing
+
       while (Date.now() < maxTime && attempts < maxAttempts) {
         attempts++;
         let foundBanner = false;
-        
+
         for (const pattern of this.COMMON_BANNER_PATTERNS) {
-          if (Date.now() >= maxTime) break;
-          
+          // Check timeout before each pattern
+          if (Date.now() >= maxTime) {
+            console.log(`⏱️ Banner handling timeout reached (${timeout}ms)`);
+            break;
+          }
+
           try {
-            const handled = await this.handleBannerPattern(page, pattern);
+            // Calculate remaining time for this pattern
+            const remainingTime = maxTime - Date.now();
+            if (remainingTime <= 0) break;
+
+            // Wrap pattern handling with timeout
+            const handled = await Promise.race([
+              this.handleBannerPattern(page, pattern),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.min(remainingTime, 3000)))
+            ]);
+
             if (handled) {
               bannersHandled++;
               foundBanner = true;
               console.log(`✅ Handled banner: ${pattern.name}`);
-              
-              // Wait after handling banner
+
+              // Wait after handling banner (with timeout check)
               if (pattern.waitAfter) {
-                await new Promise(resolve => setTimeout(resolve, pattern.waitAfter));
+                const waitTime = Math.min(pattern.waitAfter, Math.max(0, maxTime - Date.now()));
+                if (waitTime > 0) {
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+                }
               }
-              
+
               break; // Handle one banner at a time
             }
           } catch (error) {
@@ -261,29 +271,37 @@ export class BannerHandler {
             continue;
           }
         }
-        
+
         // If no banners found in this iteration, we're likely done
         if (!foundBanner) {
           break;
         }
-        
-        // Small delay between attempts
-        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Check if we have time for another attempt
+        if (Date.now() >= maxTime) break;
+
+        // Small delay between attempts (reduced from 500ms to 300ms)
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
-      
+
       const totalTime = Date.now() - startTime;
-      
+
       if (bannersHandled > 0) {
         console.log(`🎯 Successfully handled ${bannersHandled} banner(s) in ${totalTime}ms`);
       } else {
         console.log(`ℹ️ No banners detected in ${totalTime}ms`);
       }
-      
-      // Final wait to ensure page is stable
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+
+      // Reduced final wait to ensure page is stable (300ms instead of 500ms)
+      // Only wait if we have time remaining
+      const finalWaitTime = Math.min(300, Math.max(0, maxTime - Date.now()));
+      if (finalWaitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, finalWaitTime));
+      }
+
     } catch (error: any) {
-      console.warn(`⚠️ Banner handling completed with warnings: ${error.message}`);
+      const totalTime = Date.now() - startTime;
+      console.warn(`⚠️ Banner handling completed with warnings after ${totalTime}ms: ${error.message}`);
     }
   }
 
@@ -342,13 +360,19 @@ export class BannerHandler {
           await page.evaluate((el) => {
             (el as any).scrollIntoView({ behavior: 'instant', block: 'center' });
           }, element);
-          
+
           // Wait a bit for any animations
           await new Promise(resolve => setTimeout(resolve, 200));
-          
-          // Try to click the element
-          await element.click();
-          
+
+          // Click the element WITHOUT waiting for navigation
+          // Fire-and-forget approach - don't wait for any navigation that might occur
+          element.click().catch(() => {
+            // Ignore any errors from navigation or page unload
+          });
+
+          // Give the click a moment to register, but don't wait for navigation
+          await new Promise(resolve => setTimeout(resolve, 300));
+
           console.log(`🖱️ Clicked banner element: ${selector}`);
           return true;
           

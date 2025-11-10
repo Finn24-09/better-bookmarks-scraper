@@ -103,6 +103,27 @@ export class BrowserManager {
     url: string,
     options: ScreenshotOptions = {}
   ): Promise<ScreenshotResult> {
+    // Wrap entire operation with 30-second absolute maximum timeout
+    const maxProcessingTime = 30000; // 30 seconds
+    const startTime = Date.now();
+
+    const timeoutPromise = new Promise<ScreenshotResult>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Screenshot processing exceeded ${maxProcessingTime}ms maximum time limit`));
+      }, maxProcessingTime);
+    });
+
+    return Promise.race([
+      this._takeIntelligentScreenshotInternal(url, options, startTime),
+      timeoutPromise
+    ]);
+  }
+
+  private async _takeIntelligentScreenshotInternal(
+    url: string,
+    options: ScreenshotOptions = {},
+    overallStartTime: number
+  ): Promise<ScreenshotResult> {
     const {
       width = 1920,
       height = 1080,
@@ -112,7 +133,7 @@ export class BrowserManager {
       timeout = 30000,
       waitUntil = 'domcontentloaded',
       handleBanners = true,
-      bannerTimeout = 5000,
+      bannerTimeout = 3000,  // Reduced from 5000ms to 3000ms
       customBannerSelectors = [],
       injectBannerBlockingCSS = false,
       detectVideoThumbnails = true,
@@ -139,17 +160,18 @@ export class BrowserManager {
 
       // Navigate to the URL
       console.log(`📸 Taking intelligent screenshot of: ${url}`);
-      const startTime = Date.now();
-      
+      const navigationStart = Date.now();
+
       await page.goto(url, {
         waitUntil,
         timeout,
       });
 
-      // Wait a shorter time for dynamic content to load
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Reduced wait time for faster performance (500ms instead of 1000ms)
+      // This is sufficient for most modern websites with good caching
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      const loadTime = Date.now() - startTime;
+      const loadTime = Date.now() - navigationStart;
       console.log(`⏱️ Page loaded in ${loadTime}ms`);
 
       // Handle banners and overlays if enabled
@@ -176,11 +198,12 @@ export class BrowserManager {
       // Second pass for banners - age verification and overlays often appear after initial load
       if (handleBanners) {
         try {
-          // Wait a bit longer for any delayed popups (age verification, etc.)
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          
+          // Reduced wait time for delayed popups (1000ms instead of 1500ms)
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
           // Handle banners again - catches delayed age verification and popups
-          await BannerHandler.handleBanners(page, Math.min(bannerTimeout, 5000));
+          // Reduced timeout for second pass (2000ms max)
+          await BannerHandler.handleBanners(page, Math.min(bannerTimeout, 2000));
         } catch (bannerError: any) {
           console.warn(`⚠️ Second pass banner handling failed: ${bannerError.message}`);
           // Continue anyway
@@ -220,7 +243,7 @@ export class BrowserManager {
               // Return thumbnail URL directly without fetching/storing the image
               console.log(`🔗 Returning thumbnail URL directly: ${videoDetectionResult.thumbnail.url}`);
               console.log(`📊 Source: ${videoDetectionResult.thumbnail.source}, Confidence: ${videoDetectionResult.thumbnail.confidence}`);
-              const totalTime = Date.now() - startTime;
+              const totalTime = Date.now() - overallStartTime;
               console.log(`✅ Intelligent screenshot completed with thumbnail URL in ${totalTime}ms`);
               
               return {
@@ -287,7 +310,7 @@ export class BrowserManager {
         console.log(`📸 Video detection disabled, took regular screenshot`);
       }
 
-      const totalTime = Date.now() - startTime;
+      const totalTime = Date.now() - overallStartTime;
       console.log(`✅ Intelligent screenshot completed in ${totalTime}ms`);
 
       return {
@@ -359,7 +382,7 @@ export class BrowserManager {
       timeout = 30000,
       waitUntil = 'domcontentloaded',
       handleBanners = true,
-      bannerTimeout = 5000,
+      bannerTimeout = 3000,  // Reduced from 5000ms to 3000ms
       customBannerSelectors = [],
       injectBannerBlockingCSS = false,
     } = options;
@@ -386,14 +409,14 @@ export class BrowserManager {
       // Navigate to the URL
       console.log(`📸 Taking screenshot of: ${url}`);
       const startTime = Date.now();
-      
+
       await page.goto(url, {
         waitUntil,
         timeout,
       });
 
-      // Wait a shorter time for dynamic content to load
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Reduced wait time for faster performance (500ms instead of 1000ms)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const loadTime = Date.now() - startTime;
       console.log(`⏱️ Page loaded in ${loadTime}ms`);
