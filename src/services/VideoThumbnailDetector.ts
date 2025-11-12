@@ -34,41 +34,83 @@ export class VideoThumbnailDetector {
       // Inject ad detection helper function into page context
       await this.injectAdDetectionHelper(page);
 
-      // Strategy 1: Check metadata (og:image, twitter:image, schema.org)
+      // Strategy 1: Check metadata (og:image, twitter:image, schema.org) - HIGHEST PRIORITY
       log.push('📋 Strategy 1: Checking page metadata...');
       const metadataCandidates = await this.extractMetadataThumbnails(page);
       candidates.push(...metadataCandidates);
       log.push(`Found ${metadataCandidates.length} metadata candidates`);
 
-      // Strategy 2: Look for <video> tags with poster attributes
-      log.push('🎥 Strategy 2: Checking video elements...');
+      // Early exit if we found high-confidence metadata
+      if (metadataCandidates.some(c => c.confidence >= 0.85)) {
+        log.push('⚡ High-confidence metadata found, skipping remaining strategies for performance');
+        const validCandidates = await this.validateAndScoreCandidates(page, candidates);
+        const bestCandidate = this.selectBestCandidate(validCandidates);
+
+        if (bestCandidate) {
+          log.push(`✅ Selected best candidate: ${bestCandidate.method} (confidence: ${bestCandidate.confidence})`);
+          return {
+            hasVideo: true,
+            thumbnail: bestCandidate,
+            candidates: validCandidates,
+            detectionLog: log
+          };
+        }
+      }
+
+      // Strategy 2: Check for oEmbed or manifest links - SECOND PRIORITY
+      log.push('🔗 Strategy 2: Checking oEmbed and manifest links...');
+      const oembedCandidates = await this.extractOEmbedThumbnails(page);
+      candidates.push(...oembedCandidates);
+      log.push(`Found ${oembedCandidates.length} oEmbed candidates`);
+
+      // Early exit if we found oEmbed thumbnail URLs
+      if (oembedCandidates.length > 0) {
+        log.push('⚡ oEmbed thumbnail URL found, skipping remaining strategies for performance');
+        const validCandidates = await this.validateAndScoreCandidates(page, candidates);
+        const bestCandidate = this.selectBestCandidate(validCandidates);
+
+        if (bestCandidate) {
+          log.push(`✅ Selected best candidate: ${bestCandidate.method} (confidence: ${bestCandidate.confidence})`);
+          return {
+            hasVideo: true,
+            thumbnail: bestCandidate,
+            candidates: validCandidates,
+            detectionLog: log
+          };
+        }
+      }
+
+      // Strategy 3: Look for <video> tags with poster attributes
+      log.push('🎥 Strategy 3: Checking video elements...');
       const videoCandidates = await this.extractVideoElementThumbnails(page);
       candidates.push(...videoCandidates);
       log.push(`Found ${videoCandidates.length} video element candidates`);
 
-      // Strategy 3: Traverse DOM for nearby images around video containers
-      log.push('🔍 Strategy 3: Checking DOM around video containers...');
-      const domCandidates = await this.extractDOMThumbnails(page);
-      candidates.push(...domCandidates);
-      log.push(`Found ${domCandidates.length} DOM traversal candidates`);
-
-      // Strategy 4: Check CSS background images
-      log.push('🎨 Strategy 4: Checking CSS background images...');
-      const cssCandidates = await this.extractCSSBackgroundThumbnails(page);
-      candidates.push(...cssCandidates);
-      log.push(`Found ${cssCandidates.length} CSS background candidates`);
-
-      // Strategy 5: Check iframes for embedded players
-      log.push('🖼️ Strategy 5: Checking embedded iframes...');
+      // Strategy 4: Check iframes for embedded players
+      log.push('🖼️ Strategy 4: Checking embedded iframes...');
       const iframeCandidates = await this.extractIframeThumbnails(page);
       candidates.push(...iframeCandidates);
       log.push(`Found ${iframeCandidates.length} iframe candidates`);
 
-      // Strategy 6: Check for oEmbed or manifest links
-      log.push('🔗 Strategy 6: Checking oEmbed and manifest links...');
-      const oembedCandidates = await this.extractOEmbedThumbnails(page);
-      candidates.push(...oembedCandidates);
-      log.push(`Found ${oembedCandidates.length} oEmbed candidates`);
+      // Strategy 5: Check CSS background images (only if no high-confidence results yet)
+      if (!candidates.some(c => c.confidence >= 0.75)) {
+        log.push('🎨 Strategy 5: Checking CSS background images...');
+        const cssCandidates = await this.extractCSSBackgroundThumbnails(page);
+        candidates.push(...cssCandidates);
+        log.push(`Found ${cssCandidates.length} CSS background candidates`);
+      } else {
+        log.push('⚡ Skipping CSS background check (high-confidence results found)');
+      }
+
+      // Strategy 6: Traverse DOM for nearby images (last resort)
+      if (!candidates.some(c => c.confidence >= 0.7)) {
+        log.push('🔍 Strategy 6: Checking DOM around video containers...');
+        const domCandidates = await this.extractDOMThumbnails(page);
+        candidates.push(...domCandidates);
+        log.push(`Found ${domCandidates.length} DOM traversal candidates`);
+      } else {
+        log.push('⚡ Skipping DOM traversal (high-confidence results found)');
+      }
 
       // Validate and score all candidates
       log.push('⚖️ Validating and scoring candidates...');
@@ -77,9 +119,9 @@ export class VideoThumbnailDetector {
 
       // Select the best candidate
       const bestCandidate = this.selectBestCandidate(validCandidates);
-      
+
       const hasVideo = candidates.length > 0 || await this.detectVideoPresence(page);
-      
+
       if (bestCandidate) {
         log.push(`✅ Selected best candidate: ${bestCandidate.method} (confidence: ${bestCandidate.confidence})`);
       } else if (hasVideo) {
@@ -130,40 +172,68 @@ export class VideoThumbnailDetector {
           // Check element attributes for ad indicators
           const id = String(element.id || '').toLowerCase();
           const className = getClassNameString(element).toLowerCase();
-          
-          // Common ad indicators in IDs, classes, and attributes
-          const adIndicators = [
-            'ad-', '-ad-', '_ad_', 'ads-', '-ads-', '_ads_',
-            'advert', 'advertisement', 
-            'sponsored', 'sponsor-',
-            'preroll', 'prestitial',
-            'adslot', 'adsense', 'adunit', 
-            'doubleclick', 'googlesyndication',
-            'outbrain', 'taboola', 'adserver', 'adtech'
+
+          // More specific ad indicators to reduce false positives
+          const strongAdIndicators = [
+            'google_ads', 'googlesyndication', 'doubleclick',
+            'adsbygoogle', 'adsense', 'adslot', 'adunit',
+            'sponsored-content', 'sponsored-post',
+            'outbrain', 'taboola', 'adserver', 'ad-banner',
+            'advertisement-', 'preroll-ad', 'video-ad',
+            'ad-container', 'ad-wrapper', 'ad-frame'
           ];
 
-          // Check if any ad indicators are present (be more specific to avoid false positives)
-          const hasAdIndicator = adIndicators.some(indicator => 
+          // Weak indicators (only count if multiple matches or in specific patterns)
+          const weakAdIndicators = [
+            'ad-', '-ad', '_ad_', 'ads-', '-ads', '_ads_'
+          ];
+
+          // Check for strong indicators (immediate ad detection)
+          const hasStrongIndicator = strongAdIndicators.some(indicator =>
             id.includes(indicator) || className.includes(indicator)
           );
 
-          if (hasAdIndicator) return true;
+          if (hasStrongIndicator) return true;
 
-          // Check parent elements up to 2 levels (reduced from 3 to avoid false positives)
-          let parent = element.parentElement;
-          let level = 0;
-          while (parent && level < 2) {
+          // Check for weak indicators (need multiple matches or word boundaries)
+          let weakMatches = 0;
+          for (const indicator of weakAdIndicators) {
+            // Only count as weak match if it's a complete word/segment
+            const idParts = id.split(/[-_\s]/);
+            const classParts = className.split(/[-_\s]/);
+
+            if (idParts.includes('ad') || idParts.includes('ads') ||
+                classParts.includes('ad') || classParts.includes('ads')) {
+              weakMatches++;
+            }
+          }
+
+          // Need at least 2 weak matches to consider it an ad
+          if (weakMatches >= 2) return true;
+
+          // Check for data attributes that indicate ads
+          const dataAttrs = Array.from(element.attributes || [])
+            .map((attr: any) => attr.name.toLowerCase());
+
+          const hasAdDataAttr = dataAttrs.some(attr =>
+            attr.startsWith('data-ad') ||
+            attr.startsWith('data-google-query-id') ||
+            attr === 'data-advertisement'
+          );
+
+          if (hasAdDataAttr) return true;
+
+          // Check parent elements (only 1 level and only for strong indicators)
+          const parent = element.parentElement;
+          if (parent) {
             const parentId = String(parent.id || '').toLowerCase();
             const parentClass = getClassNameString(parent).toLowerCase();
-            
-            const parentHasAdIndicator = adIndicators.some(indicator =>
+
+            const parentHasStrongIndicator = strongAdIndicators.some(indicator =>
               parentId.includes(indicator) || parentClass.includes(indicator)
             );
-            
-            if (parentHasAdIndicator) return true;
-            
-            parent = parent.parentElement;
-            level++;
+
+            if (parentHasStrongIndicator) return true;
           }
 
           return false;

@@ -6,14 +6,49 @@ import { validateRequest } from '../middleware/validation';
 
 const router = Router();
 
+// Custom URL validator with enhanced security checks
+const urlValidator = (value: string, helpers: any) => {
+  try {
+    const urlObj = new URL(value);
+
+    // Only allow HTTP and HTTPS protocols
+    if (!['http:', 'https:'].includes(urlObj.protocol)) {
+      return helpers.error('url.protocol', { protocol: urlObj.protocol });
+    }
+
+    // Ensure URL is properly formatted
+    if (!urlObj.hostname) {
+      return helpers.error('url.hostname');
+    }
+
+    // Prevent URLs with authentication credentials
+    if (urlObj.username || urlObj.password) {
+      return helpers.error('url.credentials');
+    }
+
+    return value;
+  } catch (error) {
+    return helpers.error('url.invalid');
+  }
+};
+
 // Validation schema for screenshot requests
 const screenshotSchema = Joi.object({
   url: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
     .required()
+    .trim()
+    .min(10)
+    .max(2048)
+    .custom(urlValidator, 'URL validation')
     .messages({
-      'string.uri': 'URL must be a valid HTTP or HTTPS URL',
+      'string.empty': 'URL is required',
+      'string.min': 'URL is too short',
+      'string.max': 'URL exceeds maximum length of 2048 characters',
       'any.required': 'URL is required',
+      'url.protocol': 'Only HTTP and HTTPS protocols are allowed',
+      'url.hostname': 'URL must have a valid hostname',
+      'url.credentials': 'URLs with authentication credentials are not allowed',
+      'url.invalid': 'Please provide a valid URL',
     }),
   width: Joi.number()
     .integer()
@@ -23,6 +58,7 @@ const screenshotSchema = Joi.object({
     .messages({
       'number.min': 'Width must be at least 100 pixels',
       'number.max': 'Width cannot exceed 3840 pixels',
+      'number.base': 'Width must be a number',
     }),
   height: Joi.number()
     .integer()
@@ -32,6 +68,7 @@ const screenshotSchema = Joi.object({
     .messages({
       'number.min': 'Height must be at least 100 pixels',
       'number.max': 'Height cannot exceed 2160 pixels',
+      'number.base': 'Height must be a number',
     }),
   format: Joi.string()
     .valid('png', 'jpeg')
@@ -130,27 +167,42 @@ router.post(
 
       // Additional URL validation for security
       const urlObj = new URL(url);
-      
-      // Block localhost and private IPs for security
-      if (process.env.BLOCK_PRIVATE_IPS === 'true') {
-        const hostname = urlObj.hostname;
-        if (
-          hostname === 'localhost' ||
-          hostname === '127.0.0.1' ||
-          hostname === '::1' ||
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          hostname.startsWith('172.16.') ||
-          hostname.startsWith('172.17.') ||
-          hostname.startsWith('172.18.') ||
-          hostname.startsWith('172.19.') ||
-          hostname.startsWith('172.2') ||
-          hostname.startsWith('172.30.') ||
-          hostname.startsWith('172.31.')
-        ) {
+
+      // Block localhost and private IPs for security (SSRF protection)
+      if (process.env.BLOCK_PRIVATE_IPS === 'true' || process.env.BLOCK_PRIVATE_IPS === undefined) {
+        const hostname = urlObj.hostname.toLowerCase();
+
+        // Check for localhost
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') {
           return res.status(400).json({
             error: 'Invalid URL',
-            message: 'Private IP addresses and localhost are not allowed',
+            message: 'Localhost addresses are not allowed for security reasons',
+            statusCode: 400,
+          });
+        }
+
+        // Check for private IP ranges (IPv4)
+        const privateIPv4Patterns = [
+          /^10\./,                    // 10.0.0.0/8
+          /^192\.168\./,              // 192.168.0.0/16
+          /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+          /^169\.254\./,              // 169.254.0.0/16 (link-local)
+        ];
+
+        if (privateIPv4Patterns.some(pattern => pattern.test(hostname))) {
+          return res.status(400).json({
+            error: 'Invalid URL',
+            message: 'Private IP addresses are not allowed for security reasons',
+            statusCode: 400,
+          });
+        }
+
+        // Check for private IPv6 ranges
+        if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')) {
+          return res.status(400).json({
+            error: 'Invalid URL',
+            message: 'Private IPv6 addresses are not allowed for security reasons',
+            statusCode: 400,
           });
         }
       }
@@ -216,13 +268,42 @@ router.post(
       }
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
-      
-      console.error('Screenshot error:', error);
-      
-      res.status(500).json({
-        error: 'Screenshot failed',
-        message: error.message || 'An unexpected error occurred',
+
+      console.error('Screenshot error (POST):', {
+        message: error.message,
+        url: req.body.url,
         processingTime: `${processingTime}ms`,
+        stack: error.stack,
+      });
+
+      // Provide specific error messages based on error type
+      let statusCode = 500;
+      let errorMessage = 'An unexpected error occurred while processing your request';
+
+      if (error.message) {
+        if (error.message.includes('Navigation timeout') || error.message.includes('timeout')) {
+          statusCode = 504;
+          errorMessage = 'The website took too long to load. Please try again or increase the timeout parameter.';
+        } else if (error.message.includes('net::ERR') || error.message.includes('Network')) {
+          statusCode = 502;
+          errorMessage = 'Unable to reach the website. Please check the URL and try again.';
+        } else if (error.message.includes('Invalid URL') || error.message.includes('Protocol error')) {
+          statusCode = 400;
+          errorMessage = error.message;
+        } else if (error.message.includes('Target closed') || error.message.includes('Session closed')) {
+          statusCode = 503;
+          errorMessage = 'Browser service unavailable. Please try again in a moment.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
+      res.status(statusCode).json({
+        error: 'Screenshot failed',
+        message: errorMessage,
+        statusCode,
+        processingTime: `${processingTime}ms`,
+        timestamp: new Date().toISOString(),
       });
     }
   }
@@ -264,29 +345,44 @@ router.get(
         detectVideoThumbnails,
       } = value;
 
-      // Additional URL validation for security
+      // Additional URL validation for security (same as POST endpoint)
       const urlObj = new URL(url);
-      
-      // Block localhost and private IPs for security
-      if (process.env.BLOCK_PRIVATE_IPS === 'true') {
-        const hostname = urlObj.hostname;
-        if (
-          hostname === 'localhost' ||
-          hostname === '127.0.0.1' ||
-          hostname === '::1' ||
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          hostname.startsWith('172.16.') ||
-          hostname.startsWith('172.17.') ||
-          hostname.startsWith('172.18.') ||
-          hostname.startsWith('172.19.') ||
-          hostname.startsWith('172.2') ||
-          hostname.startsWith('172.30.') ||
-          hostname.startsWith('172.31.')
-        ) {
+
+      // Block localhost and private IPs for security (SSRF protection)
+      if (process.env.BLOCK_PRIVATE_IPS === 'true' || process.env.BLOCK_PRIVATE_IPS === undefined) {
+        const hostname = urlObj.hostname.toLowerCase();
+
+        // Check for localhost
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') {
           return res.status(400).json({
             error: 'Invalid URL',
-            message: 'Private IP addresses and localhost are not allowed',
+            message: 'Localhost addresses are not allowed for security reasons',
+            statusCode: 400,
+          });
+        }
+
+        // Check for private IP ranges (IPv4)
+        const privateIPv4Patterns = [
+          /^10\./,
+          /^192\.168\./,
+          /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+          /^169\.254\./,
+        ];
+
+        if (privateIPv4Patterns.some(pattern => pattern.test(hostname))) {
+          return res.status(400).json({
+            error: 'Invalid URL',
+            message: 'Private IP addresses are not allowed for security reasons',
+            statusCode: 400,
+          });
+        }
+
+        // Check for private IPv6 ranges
+        if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')) {
+          return res.status(400).json({
+            error: 'Invalid URL',
+            message: 'Private IPv6 addresses are not allowed for security reasons',
+            statusCode: 400,
           });
         }
       }
@@ -352,13 +448,42 @@ router.get(
       }
     } catch (error: any) {
       const processingTime = Date.now() - startTime;
-      
-      console.error('Screenshot error:', error);
-      
-      res.status(500).json({
-        error: 'Screenshot failed',
-        message: error.message || 'An unexpected error occurred',
+
+      console.error('Screenshot error (GET):', {
+        message: error.message,
+        url: req.query.url,
         processingTime: `${processingTime}ms`,
+        stack: error.stack,
+      });
+
+      // Provide specific error messages based on error type
+      let statusCode = 500;
+      let errorMessage = 'An unexpected error occurred while processing your request';
+
+      if (error.message) {
+        if (error.message.includes('Navigation timeout') || error.message.includes('timeout')) {
+          statusCode = 504;
+          errorMessage = 'The website took too long to load. Please try again or increase the timeout parameter.';
+        } else if (error.message.includes('net::ERR') || error.message.includes('Network')) {
+          statusCode = 502;
+          errorMessage = 'Unable to reach the website. Please check the URL and try again.';
+        } else if (error.message.includes('Invalid URL') || error.message.includes('Protocol error')) {
+          statusCode = 400;
+          errorMessage = error.message;
+        } else if (error.message.includes('Target closed') || error.message.includes('Session closed')) {
+          statusCode = 503;
+          errorMessage = 'Browser service unavailable. Please try again in a moment.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
+      res.status(statusCode).json({
+        error: 'Screenshot failed',
+        message: errorMessage,
+        statusCode,
+        processingTime: `${processingTime}ms`,
+        timestamp: new Date().toISOString(),
       });
     }
   }
