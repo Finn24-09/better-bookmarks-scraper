@@ -78,6 +78,10 @@ export class BrowserManager {
           '--disable-features=BlinkGenPropertyTrees',
           '--run-all-compositor-stages-before-draw',
           '--disable-ipc-flooding-protection',
+          '--disable-crash-reporter',
+          '--no-crash-upload',
+          '--crash-dumps-dir=/tmp',
+          '--user-data-dir=/tmp/chrome-user-data',
         ],
         defaultViewport: {
           width: 1920,

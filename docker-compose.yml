@@ -31,14 +31,8 @@ services:
       start_period: 40s
     security_opt:
       - no-new-privileges:true
-    read_only: true
     tmpfs:
-      - /tmp:noexec,nosuid,size=100m
-    cap_drop:
-      - ALL
-    cap_add:
-      - SETGID
-      - SETUID
+      - /tmp:nosuid,size=100m
     networks:
       - better-bookmarks-network
     logging:

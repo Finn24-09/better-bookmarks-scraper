@@ -1,12 +1,12 @@
 {
   "name": "better-bookmarks-scraper",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Fast, lightweight screenshot API service for better bookmarks scraping",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
+    "dev": "npx ts-node src/server.ts",
     "test": "jest",
     "docker:build": "docker build -t better-bookmarks-scraper .",
     "docker:run": "docker run -p 8080:8080 better-bookmarks-scraper",
