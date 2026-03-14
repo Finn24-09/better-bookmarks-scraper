@@ -1,4 +1,5 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
+import fs from 'fs';
 import { BannerHandler } from './BannerHandler';
 import { VideoThumbnailDetector, VideoDetectionResult } from './VideoThumbnailDetector';
 
@@ -58,7 +59,14 @@ export class BrowserManager {
   private async getBrowser(): Promise<Browser> {
     if (!this.browser) {
       console.log('🚀 Launching new browser instance...');
-      
+
+      const userDataDir = '/tmp/chrome-user-data';
+      try {
+        fs.rmSync(userDataDir, { recursive: true, force: true });
+      } catch {
+        // ignore — directory may not exist
+      }
+
       this.browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -260,7 +268,7 @@ export class BrowserManager {
             // For other thumbnail sources, try to fetch the image
             try {
               console.log(`🖼️ Fetching thumbnail: ${videoDetectionResult.thumbnail.url}`);
-              const response = await page.evaluate(async (thumbnailUrl) => {
+              const response = await page.evaluate(async (thumbnailUrl: string) => {
                 const response = await fetch(thumbnailUrl);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const arrayBuffer = await response.arrayBuffer();

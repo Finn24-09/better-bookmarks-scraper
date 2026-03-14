@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer';
+import { ElementHandle, Page } from 'puppeteer';
 
 export interface BannerPattern {
   name: string;
@@ -328,7 +328,7 @@ export class BannerHandler {
             if (!element || !element.asElement()) {
               continue;
             }
-            element = element.asElement();
+            element = element.asElement() as ElementHandle<Element>;
           }
         } else {
           // Regular selector

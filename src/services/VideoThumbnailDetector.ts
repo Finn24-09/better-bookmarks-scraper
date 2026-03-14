@@ -676,7 +676,7 @@ export class VideoThumbnailDetector {
     for (const candidate of candidates) {
       try {
         // Resolve relative URLs
-        const absoluteUrl = await page.evaluate((url) => {
+        const absoluteUrl = await page.evaluate((url: string) => {
           try {
             return new URL(url, (globalThis as any).window.location.href).href;
           } catch {
@@ -688,7 +688,7 @@ export class VideoThumbnailDetector {
         
         // Get image dimensions if not already available
         if (!candidate.width || !candidate.height) {
-          const dimensions = await page.evaluate(async (url) => {
+          const dimensions = await page.evaluate(async (url: string) => {
             return new Promise<{width: number, height: number}>((resolve) => {
               const img = new (globalThis as any).Image();
               img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
