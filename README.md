@@ -1,5 +1,11 @@
 # Better Bookmarks Scraper
 
+> ## ⚠️ Deprecated and Archived
+>
+> **This project is no longer maintained.** The repository is deprecated and will be archived. There is no planned replacement.
+>
+> No further updates, bug fixes, security patches, or support will be provided. You are welcome to fork the code, but use it at your own risk.
+
 A fast, lightweight, and secure screenshot API service optimized for Google Cloud Run. Built with Node.js, Express, TypeScript, and Puppeteer with intelligent video thumbnail detection and automatic banner handling.
 
 ## ✨ Features
